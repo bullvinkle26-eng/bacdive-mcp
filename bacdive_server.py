@@ -56,13 +56,25 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if request.url.path in ["/health", "/", "/health/"]:
             return await call_next(request)
 
-        # Если задан секретный ключ, требуем корректный токен
+        # Если задан секретный ключ, проверяем заголовок Authorization, X-API-Key или query-параметр (?key= или ?token=)
         if self.api_key:
             auth_header = request.headers.get("authorization", "").strip()
             custom_key = request.headers.get("x-api-key", "").strip()
+            query_key = (
+                request.query_params.get("key")
+                or request.query_params.get("token")
+                or request.query_params.get("api_key")
+                or ""
+            ).strip()
             expected_bearer = f"Bearer {self.api_key}"
 
-            if auth_header != expected_bearer and custom_key != self.api_key:
+            is_authorized = (
+                auth_header == expected_bearer
+                or custom_key == self.api_key
+                or query_key == self.api_key
+            )
+
+            if not is_authorized:
                 logger.warning(
                     "Unauthorized request to '%s' from %s",
                     request.url.path,
@@ -70,7 +82,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 )
                 return JSONResponse(
                     {
-                        "error": "Unauthorized: Invalid or missing API key. Provide 'Authorization: Bearer <API_KEY>' or 'X-API-Key: <API_KEY>'."
+                        "error": "Unauthorized: Invalid or missing API key. Provide 'Authorization: Bearer <API_KEY>', 'X-API-Key: <API_KEY>', or '?key=<API_KEY>' in the URL."
                     },
                     status_code=401,
                 )
