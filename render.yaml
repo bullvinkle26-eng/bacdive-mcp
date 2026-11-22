@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: bacdive-mcp-server
+    env: python
+    region: frankfurt  # или oregon, ohio, singapore
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bacdive_server.py
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: MCP_TRANSPORT
+        value: http
