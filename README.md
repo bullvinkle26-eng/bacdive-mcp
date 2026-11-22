@@ -12,6 +12,7 @@
 - **Поддержка Streamable HTTP и SSE**: Подходит для любых современных MCP-клиентов (Claude Desktop, Cursor, Windsurf, Cline, Continue и др.).
 - **Оптимизация токенов контекста LLM**: Инструмент `get_strain_details` поддерживает фильтрацию по разделам (`section`), позволяя запрашивать только морфологию, условия роста, метаболизм или геномные данные, экономя десятки тысяч токенов.
 - **Интеллектуальный поиск по сиквенсам**: Автоматическое определение типа последовательности (16S рРНК vs сборка генома NCBI/GenBank) при передаче параметра `sequence_type="auto"`.
+- **Защита доступа (API Key / Bearer)**: Возможность закрыть сервер секретным ключом через переменную окружения `MCP_API_KEY`. При этом эндпоинт `/health` остается открытым для Keep-Alive пингов (UptimeRobot).
 - **Готов к деплою на Render.com**: Автоматически слушает порт из переменной окружения `PORT` (`0.0.0.0:$PORT`) и содержит эндпоинт `/health` для проверки доступности.
 
 ---
@@ -96,12 +97,24 @@ curl https://bacdive-mcp-server.onrender.com/health
       "args": [
         "-y",
         "mcp-remote",
-        "https://bacdive-mcp-server.onrender.com/mcp"
+        "https://bacdive-mcp-server.onrender.com/mcp",
+        "--header",
+        "Authorization: Bearer YOUR_MCP_API_KEY"
       ]
     }
   }
 }
 ```
+
+### Настройка в Cursor / Windsurf / Cline
+Укажите:
+- **URL**: `https://bacdive-mcp-server.onrender.com/mcp`
+- **Headers**:
+  ```json
+  {
+    "Authorization": "Bearer YOUR_MCP_API_KEY"
+  }
+  ```
 
 *(Если клиент поддерживает нативное указание HTTP/SSE URL без локального моста, укажите URL напрямую в настройках клиента)*.
 

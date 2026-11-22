@@ -17,6 +17,8 @@ from typing import Any, Dict, List, Optional, Union
 
 import httpx
 from fastmcp import FastMCP
+from starlette.middleware import Middleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
@@ -34,6 +36,46 @@ HTTP_TIMEOUT = float(os.environ.get("BACDIVE_TIMEOUT", "30.0"))
 DEFAULT_PORT = int(os.environ.get("PORT", 8000))
 SERVER_HOST = os.environ.get("HOST", "0.0.0.0")
 DEFAULT_TRANSPORT = os.environ.get("MCP_TRANSPORT", "http").strip().lower()
+MCP_API_KEY = os.environ.get("MCP_API_KEY", "").strip()
+
+
+# --- Middleware аутентификации ---
+class AuthMiddleware(BaseHTTPMiddleware):
+    """
+    Middleware для защиты эндпоинтов MCP сервера.
+    Разрешает доступ к эндпоинтам проверки здоровья (/health и /) без авторизации,
+    но требует заголовок 'Authorization: Bearer <MCP_API_KEY>' или 'X-API-Key: <MCP_API_KEY>'
+    для всех остальных маршрутов (включая /mcp и /sse), если MCP_API_KEY задан.
+    """
+    def __init__(self, app, api_key: str):
+        super().__init__(app)
+        self.api_key = api_key
+
+    async def dispatch(self, request: Request, call_next):
+        # Health check и корневая справка всегда открыты для мониторинга и Render
+        if request.url.path in ["/health", "/", "/health/"]:
+            return await call_next(request)
+
+        # Если задан секретный ключ, требуем корректный токен
+        if self.api_key:
+            auth_header = request.headers.get("authorization", "").strip()
+            custom_key = request.headers.get("x-api-key", "").strip()
+            expected_bearer = f"Bearer {self.api_key}"
+
+            if auth_header != expected_bearer and custom_key != self.api_key:
+                logger.warning(
+                    "Unauthorized request to '%s' from %s",
+                    request.url.path,
+                    request.client.host if request.client else "unknown",
+                )
+                return JSONResponse(
+                    {
+                        "error": "Unauthorized: Invalid or missing API key. Provide 'Authorization: Bearer <API_KEY>' or 'X-API-Key: <API_KEY>'."
+                    },
+                    status_code=401,
+                )
+
+        return await call_next(request)
 
 # Карта разделов BacDive для удобной нечувствительной к регистру и частичной фильтрации
 KNOWN_SECTIONS = [
@@ -457,8 +499,16 @@ async def get_strain_details(
     }
 
 
+# Подготавливаем middleware безопасности
+middleware_list = []
+if MCP_API_KEY:
+    logger.info("Security: API Key protection ENABLED.")
+    middleware_list.append(Middleware(AuthMiddleware, api_key=MCP_API_KEY))
+else:
+    logger.info("Security: MCP_API_KEY is not set. Server is running in PUBLIC mode.")
+
 # Экспортируем Starlette ASGI app для возможности запуска через `uvicorn bacdive_server:app`
-app = mcp.http_app()
+app = mcp.http_app(middleware=middleware_list if middleware_list else None)
 
 
 # --- Точка входа ---
@@ -470,10 +520,15 @@ if __name__ == "__main__":
     print(f"[*] BacDive MCP Server listening on http://{SERVER_HOST}:{port}")
     print(f"[*] MCP Endpoint: http://{SERVER_HOST}:{port}/mcp (transport={transport})")
     print(f"[*] Health check: http://{SERVER_HOST}:{port}/health")
+    if MCP_API_KEY:
+        print("[*] Security: Authentication REQUIRED (Bearer token or X-API-Key)")
+    else:
+        print("[*] Security: Public access (no MCP_API_KEY set)")
 
     # FastMCP run() поддерживает транспорты 'http', 'sse', 'stdio'
     mcp.run(
         transport=transport,
         host=SERVER_HOST,
         port=port,
+        middleware=middleware_list if middleware_list else None,
     )
